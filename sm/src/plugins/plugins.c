@@ -1,8 +1,5 @@
 #include "plugins.h"
-
-#ifdef PLUGIN_ENABLE_MULTIMEM
-  #include "multimem.c"
-#endif
+#include "multimem.c"
 
 uintptr_t
 call_plugin(
@@ -13,14 +10,11 @@ call_plugin(
     uintptr_t arg1)
 {
   switch(plugin_id) {
-#ifdef PLUGIN_ENABLE_MULTIMEM
     case PLUGIN_ID_MULTIMEM:
       return do_sbi_multimem(id, call_id, arg0);
       break;
-#endif
     default:
       // TOO fix it
       return SBI_ERR_SM_NOT_IMPLEMENTED;
   }
 }
-
