@@ -24,7 +24,7 @@ Before exploring the new changes, directories, and files, it's crucial to set up
    make -j$(nproc)
    ```
 
-4. create a new directory called "seal" in: `buildroot/package`
+4. Create a new directory called "seal" in: `buildroot/package`
 
 5. Create `Config.in` file in this `buildroot/package/seal` directory with:
    ```
