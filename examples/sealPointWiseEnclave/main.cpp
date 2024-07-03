@@ -1,10 +1,79 @@
 #include <iostream>
 #include <vector>
-#include <sstream>
-#include "seal/seal.h"
+#include <stdexcept>
+#include <seal/seal.h>
 
 using namespace std;
 using namespace seal;
+
+// Function to encrypt a matrix
+vector<vector<Ciphertext>> encryptMatrix(const vector<vector<int>>& matrix, Encryptor& encryptor, BatchEncoder& batch_encoder) {
+    vector<vector<Ciphertext>> encrypted_matrix;
+    for (const auto& row : matrix) {
+        vector<Ciphertext> encrypted_row;
+        for (int val : row) {
+            vector<uint64_t> pod_matrix(batch_encoder.slot_count(), val);
+            Plaintext plain_matrix;
+            batch_encoder.encode(pod_matrix, plain_matrix);
+            Ciphertext encrypted;
+            encryptor.encrypt(plain_matrix, encrypted);
+            encrypted_row.push_back(encrypted);
+        }
+        encrypted_matrix.push_back(encrypted_row);
+    }
+    return encrypted_matrix;
+}
+
+// Function to decrypt a matrix
+vector<vector<int>> decryptMatrix(const vector<vector<Ciphertext>>& encrypted_matrix, Decryptor& decryptor, BatchEncoder& batch_encoder) {
+    vector<vector<int>> decrypted_matrix;
+    for (const auto& row : encrypted_matrix) {
+        vector<int> decrypted_row;
+        for (const auto& encrypted : row) {
+            Plaintext plain_result;
+            decryptor.decrypt(encrypted, plain_result);
+            vector<uint64_t> pod_result;
+            batch_encoder.decode(plain_result, pod_result);
+            decrypted_row.push_back(static_cast<int>(pod_result[0]));
+        }
+        decrypted_matrix.push_back(decrypted_row);
+    }
+    return decrypted_matrix;
+}
+
+// Function to multiply encrypted matrices pointwise
+vector<vector<Ciphertext>> multiplyEncryptedMatricesPointwise(
+    const vector<vector<Ciphertext>>& matrix1, 
+    const vector<vector<Ciphertext>>& matrix2, 
+    Evaluator& evaluator) {
+    
+    if (matrix1.size() != matrix2.size() || matrix1[0].size() != matrix2[0].size()) {
+        throw invalid_argument("Matrices must have the same dimensions for pointwise multiplication.");
+    }
+
+    size_t rows = matrix1.size();
+    size_t cols = matrix1[0].size();
+
+    vector<vector<Ciphertext>> result(rows, vector<Ciphertext>(cols));
+
+    for (size_t i = 0; i < rows; ++i) {
+        for (size_t j = 0; j < cols; ++j) {
+            evaluator.multiply(matrix1[i][j], matrix2[i][j], result[i][j]);
+        }
+    }
+
+    return result;
+}
+
+// Function to print a matrix
+void printMatrix(const vector<vector<int>>& matrix) {
+    for (const auto& row : matrix) {
+        for (int val : row) {
+            cout << val << " ";
+        }
+        cout << endl;
+    }
+}
 
 int main() {
     // Set up encryption parameters
@@ -14,7 +83,6 @@ int main() {
     parms.set_coeff_modulus(CoeffModulus::BFVDefault(poly_modulus_degree));
     parms.set_plain_modulus(PlainModulus::Batching(poly_modulus_degree, 20));
 
-    // Generate context
     SEALContext context(parms);
 
     // Generate keys
@@ -23,60 +91,41 @@ int main() {
     PublicKey public_key;
     keygen.create_public_key(public_key);
 
-    // Set up encryptor, evaluator, and decryptor
+    // Set up encryption tools
     Encryptor encryptor(context, public_key);
     Evaluator evaluator(context);
     Decryptor decryptor(context, secret_key);
+    BatchEncoder batch_encoder(context);
 
-    // Define matrices
-    vector<vector<int>> matrix1 = {{1, 2, 3, 4}, {5, 6, 7, 8}, {9, 10, 11, 12}};
-    vector<vector<int>> matrix2 = {{1, 2, 3, 4}, {5, 6, 7, 8}, {9, 10, 11, 12}};
+    // Define input matrices
+    vector<vector<int>> matrix1 = {{1, 2, 3, 4},
+                                   {5, 6, 7, 8},
+                                   {9, 10, 11, 12},
+                                   {13, 14, 15, 16}};
+
+    vector<vector<int>> matrix2 = {{16, 15, 14, 13},
+                                   {12, 11, 10, 9},
+                                   {8, 7, 6, 5},
+                                   {4, 3, 2, 1}};
+
+    cout << "Matrix 1:" << endl;
+    printMatrix(matrix1);
+
+    cout << "\nMatrix 2:" << endl;
+    printMatrix(matrix2);
 
     // Encrypt matrices
-    vector<vector<Ciphertext>> encrypted_matrix1, encrypted_matrix2;
-    for (const auto& row : matrix1) {
-        vector<Ciphertext> encrypted_row;
-        for (int val : row) {
-            Plaintext plain(to_string(val));
-            Ciphertext encrypted;
-            encryptor.encrypt(plain, encrypted);
-            encrypted_row.push_back(encrypted);
-        }
-        encrypted_matrix1.push_back(encrypted_row);
-    }
-    for (const auto& row : matrix2) {
-        vector<Ciphertext> encrypted_row;
-        for (int val : row) {
-            Plaintext plain(to_string(val));
-            Ciphertext encrypted;
-            encryptor.encrypt(plain, encrypted);
-            encrypted_row.push_back(encrypted);
-        }
-        encrypted_matrix2.push_back(encrypted_row);
-    }
+    auto encrypted_matrix1 = encryptMatrix(matrix1, encryptor, batch_encoder);
+    auto encrypted_matrix2 = encryptMatrix(matrix2, encryptor, batch_encoder);
 
-    // Perform matrix multiplication
-    vector<vector<Ciphertext>> result_matrix;
-    for (size_t i = 0; i < encrypted_matrix1.size(); i++) {
-        vector<Ciphertext> result_row;
-        for (size_t j = 0; j < encrypted_matrix1[0].size(); j++) {
-            Ciphertext product;
-            evaluator.multiply(encrypted_matrix1[i][j], encrypted_matrix2[i][j], product);
-            result_row.push_back(product);
-        }
-        result_matrix.push_back(result_row);
-    }
+    // Perform encrypted pointwise matrix multiplication
+    auto encrypted_result = multiplyEncryptedMatricesPointwise(encrypted_matrix1, encrypted_matrix2, evaluator);
 
-    // Decrypt and print result
-    cout << "Result of matrix element wise multiplication:" << endl;
-    for (const auto& row : result_matrix) {
-        for (const auto& encrypted : row) {
-            Plaintext decrypted;
-            decryptor.decrypt(encrypted, decrypted);
-            cout << decrypted.to_string() << " ";
-        }
-        cout << endl;
-    }
+    // Decrypt result
+    auto decrypted_result = decryptMatrix(encrypted_result, decryptor, batch_encoder);
+
+    cout << "\nDecrypted Result of pointwise matrix multiplication with FHE:" << endl;
+    printMatrix(decrypted_result);
 
     return 0;
 }
