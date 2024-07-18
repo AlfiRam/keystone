@@ -1,0 +1,40 @@
+Function EncryptMatrix(matrix, encryptor, batchEncoder):
+    encryptedMatrix = empty 2D array
+    For each row in matrix:
+        encryptedRow = empty array
+        For each value in row:
+            plaintext = batchEncoder.Encode(value)
+            ciphertext = encryptor.Encrypt(plaintext)
+            Add ciphertext to encryptedRow
+        Add encryptedRow to encryptedMatrix
+    Return encryptedMatrix
+
+Function DecryptMatrix(encryptedMatrix, decryptor, batchEncoder):
+    decryptedMatrix = empty 2D array
+    For each row in encryptedMatrix:
+        decryptedRow = empty array
+        For each ciphertext in row:
+            plaintext = decryptor.Decrypt(ciphertext)
+            value = batchEncoder.Decode(plaintext)[0]  // Take first value
+            Add value to decryptedRow
+        Add decryptedRow to decryptedMatrix
+    Return decryptedMatrix
+
+Function MultiplyEncryptedMatrices(encMatrix1, encMatrix2, evaluator):
+    rows1 = number of rows in encMatrix1
+    cols1 = number of columns in encMatrix1
+    cols2 = number of columns in encMatrix2
+
+    encResult = CreateEncryptedMatrix(rows1, cols2)
+
+    For i = 0 to rows1 - 1:
+        For j = 0 to cols2 - 1:
+            encSum = evaluator.Multiply(encMatrix1[i][0], encMatrix2[0][j])
+            For k = 1 to cols1 - 1:
+                encProduct = evaluator.Multiply(encMatrix1[i][k], encMatrix2[k][j])
+                encSum = evaluator.Add_inplace(encSum, encProduct)
+            encResult[i][j] = encSum
+
+    Return encResult
+
+    

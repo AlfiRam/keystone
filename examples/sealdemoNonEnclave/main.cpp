@@ -46,14 +46,7 @@ int main() {
     decryptor.decrypt(addition_result, decrypted_addition_result);
     cout << "Addition result: " << decrypted_addition_result.to_string() << endl;
 
-    // Perform multiplication on ciphertexts
-    Ciphertext multiplication_result;
-    evaluator.multiply(ciphertext1, ciphertext2, multiplication_result);
-
-    // Decrypt the multiplication result
-    Plaintext decrypted_multiplication_result;
-    decryptor.decrypt(multiplication_result, decrypted_multiplication_result);
-    cout << "Multiplication result: " << decrypted_multiplication_result.to_string() << endl;
-
     return 0;
 }
+
+

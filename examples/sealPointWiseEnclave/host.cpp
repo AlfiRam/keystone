@@ -8,7 +8,7 @@ using namespace std;
 int main(int argc, char** argv) {
     Enclave enclave;
     Params params;
-    params.setFreeMemSize(1024 * 1024 * 100);  // MB
+    params.setFreeMemSize(1024 * 1024 * 200);  // MB
     params.setUntrustedSize(1024 * 1024 * 4); // MB
 
     enclave.init(argv[1], argv[2], argv[3], params);

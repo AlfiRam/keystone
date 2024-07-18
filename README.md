@@ -1,106 +1,173 @@
-# Keystone: An Open-Source Secure Enclave Framework for RISC-V Processors
+# FHE in Keystone
 
-![Documentation Status](https://readthedocs.org/projects/keystone-enclave/badge/)
-[![Build Status](https://travis-ci.org/keystone-enclave/keystone.svg?branch=master)](https://travis-ci.org/keystone-enclave/keystone/)
+## Important Notice
+**Do not clone this repo directly.** It will result in an unsuccessful build. This repository is for viewing purposes only, showcasing changes and additions to the original Keystone repository.
 
-> Visit [Project Website](https://keystone-enclave.org) for more information.
+## Prerequisites
+Before exploring the new changes, directories, and files, it's crucial to set up Keystone on QEMU. Follow the official documentation: [Keystone QEMU Setup](https://docs.keystone-enclave.org/en/latest/Getting-Started/QEMU-Setup-Repository.html). A summary of the essential instructions taken from that documentation is also included in the instructions below:
 
-## Introduction
+## Setup Instructions
 
-Keystone is an open-source project that builds trusted execution environments (TEEs) for RISC-V systems. Its hardware-enforced and software-defined memory isolation enables trusted computing (a.k.a. confidential computing) with various threat models and functionalities. The implementation is platform-agnostic, making Keystone portable across different RISC-V platforms with minimal engineering efforts.
+1. Clone the Keystone repository with submodules:
+   ```
+   git clone --recurse-submodules https://github.com/keystone-enclave/keystone.git
+   ```
 
+2. Install required packages:
+   ```
+   sudo apt update
+   sudo apt install autoconf automake autotools-dev bc bison build-essential curl expat jq libexpat1-dev flex gawk gcc git gperf libgmp-dev libmpc-dev libmpfr-dev libtool texinfo tmux patchutils zlib1g-dev wget bzip2 patch vim-common lbzip2 python3 pkg-config libglib2.0-dev libpixman-1-dev libssl-dev screen device-tree-compiler expect makeself unzip cpio rsync cmake ninja-build p7zip-full
+   ```
 
-## Goals
+3. Build all components:
+   ```
+   make -j$(nproc)
+   ```
 
-Keystone is a free and open framework for architecting and deploying TEEs on RISC-V hardware platforms. The project's goals are:
+4. Add the "seal" directory to `buildroot/package/`
 
-* **Enable TEE on (almost) all RISC-V processors**: Keystone aims to support as many RISC-V processor cores that follow RISC-V standard ISA and sub-ISAs as possible. This will help hardware designers and manufacturers to enable TEE with minimal efforts.
+5. Create `Config.in` file in the new `buildroot/package/seal` directory with:
+   ```
+   menuconfig BR2_PACKAGE_SEAL
+     bool "seal"
+     help
+       Microsoft SEAL is an open-source homomorphic encryption library.
+       https://github.com/microsoft/Microsoft-SEAL
+   ```
 
-* **Make TEE easy to customize depending on needs**: while providing simple TEE features, Keystone also aims to allow various customization that depends on platform-specific features or non-standard sub-ISAs. We borrow the concept from software-defined network, where hardware platform provides *primitives* and the software leverages the primitives to implement specific functionalities or meet security requirements.
+6. Create `seal.mk` file in the new `buildroot/package/seal` directory with the following content:
+   ```makefile
+   ################################################################################
+   #
+   # seal
+   #
+   ################################################################################
 
-* **Reduce the cost of building TEE**: Keystone aims to reduce the cost of building TEE or TEE-based systems. We achieve this by reusing the implementation across multiple different platforms, reducing hardware integration cost, reducing verification cost, and integrating with existing software tools. We hope that anyone can simply extend Keystone to build their own novel TEE design with very low cost.
+   SEAL_VERSION = 4.1.2
+   SEAL_SITE = $(call github,microsoft,SEAL,v$(SEAL_VERSION))
+   SEAL_INSTALL_STAGING = YES
+   SEAL_SUPPORTS_IN_SOURCE_BUILD = NO
+   SEAL_CONF_OPTS = \
+       -DSEAL_BUILD_DEPS=ON \
+       -DSEAL_BUILD_EXAMPLES=OFF \
+       -DSEAL_BUILD_TESTS=OFF \
+       -DSEAL_USE_ZSTD=OFF \
+       -DSEAL_THROW_ON_TRANSPARENT_CIPHERTEXT=OFF \
+       -DSEAL_USE_MSGSL=OFF \
+       -DSEAL_USE_ZLIB=OFF \
+       -DBUILD_SHARED_LIBS=OFF \
+       -DSEAL_BUILD_SEAL_C=ON \
+       -DSEAL_BUILD_STATIC_SEAL_C=ON
 
+   $(eval $(cmake-package))
+   ```
 
-## Status
+7. Modify `buildroot/package/Config.in`:
+   Add a "SEAL" menu under the "Libraries" category. It should look like this:
+   ```
+   menu "Libraries"
 
-Keystone started as an academic project that helps researchers to build and test their ideas. 
-Now, Keystone is an **Incubation Stage** open-source project of the Confidential Computing Consortium (CCC) under the Linux Foundation. 
+   menu "SEAL"
+       source "package/seal/Config.in"
+   endmenu
 
-Keystone has helped many researchers focus on their creative ideas instead of building TEE by themselves from scratch.
-This resulted in many innovative research projects and publications, which have been pushing the technical advancement of TEEs.
+   menu "Audio/Sound"
+       source "package/alsa-lib/Config.in"
+       source "package/alsa-plugins/Config.in"
+       source "package/alure/Config.in"
+       source "package/aubio/Config.in"
+   # ... (rest of the file)
+   ```
 
-We are currently trying to make Keystone production-ready. You can find the latest general roadmap of Keystone [here](https://docs.google.com/document/d/1E-982564GvOcWzdCqM7TXCJV_7uWy2F8NiwglWorjFA/edit#heading=h.xa3pe84ubay4)
+8. Configure buildroot:
+   ```
+   make buildroot-configure
+   ```
 
-Here are some ongoing and/or planned efforts towards the goal:
+9. Enable SEAL in the buildroot configuration:
+   Navigate to Target Packages -> Libraries -> SEAL -> [*] seal
 
-* **Technical Improvements**: Make Keystone more usable and on par with existing industry solutions, including memory isolation improvement, better application and hardware support, and additional features.
+10. Save and exit buildroot configuration
 
-* **Parity with Industry Standards**: Make Keystone follow the industry standard. This includes standard cryptography, measured boot, and remote attestation protocols. 
+11. Rebuild all Keystone components:
+    ```
+    make -j$(nproc)
+    ```
 
-* **Hardware Integration**: Partner with RISC-V hardware designer/vendor to fully integrate with the hardware. This includes integration with hardware root-of-trust, memory encryption engine, and crypto accelerators.
+12. The previous command will result in downloading and building the SEAL package. Note the locations of SEAL's static library and include directory, as they will be used in the CMakeLists files of our FHE-Keystone apps:
+    - Static library: usually found at `buildroot.build/per-package/seal/target/usr/lib/libseal-4.1.a`
+    - Include directory: may be found at `build-generic64/buildroot.build/per-package/seal/host/riscv64-buildroot-linux-gnu/sysroot/usr/include/SEAL-4.1`
 
-## Documentation
+13. I have added several FHE demonstrations and they are available in this repo's `examples` directory:
+    - `examples/sealdemoNonEnclave`
+    - `examples/sealMatrixAddEnclave`
+    - `examples/sealMatrixMulEnclave`
+    - `examples/sealMatrixRotationEnclave`
+    - `examples/sealPointWiseEnclave`
 
-See [docs](http://docs.keystone-enclave.org) for getting started.
+    Note: Some implementations may require further refinement
 
-## Hardware Support
+14. Rebuild the examples component:
+    ```
+    BUILDROOT_TARGET=keystone-examples-dirclean make -j$(nproc)
+    ```
 
-Keystone requires a standard RISC-V platform with a *hardware root of trust* --- including secure key storage and measured boot. Currently, no hardware root of trust has been designed or manufactured specifically for Keystone. If you have a open-source root-of-trust we'd love to integrate with it!
+15. Add the following code to `runtime/call/syscall.c` under `#ifdef USE_LINUX_SYSCALL`:
 
-As this project focuses more on the software stack and the toolchain, you can still run the full Keystone software stack on top of a few RISC-V platforms without a real root-of-trust. See https://github.com/keystone-enclave/keystone/tree/master/sm/plat for the supported platforms. In general, `generic` should work with most of the standard RISC-V cores as long as they support:
+    ```c
+    // ... existing code ...
 
-- RV64 with SV39 addressing mode (or RV32 with SV32)
-- M/S/U privilege modes
-- More than 4 PMP registers
+    case(SYS_set_tid_address):
+      ret = linux_set_tid_address((int*) arg0);
+      break;
 
-For full security, platform architect needs to provide the followings
+    // Add the following three lines:
+    case(SYS_futex):
+      ret = 0;
+      break;
+    
+    case(SYS_brk):
+      ret = syscall_brk((void*) arg0);
+      break;
 
-- Entropy source (and ideally a platform specific random number generator)
-- Measured boot
-- Secure on-chip key storage
+    // ... rest of the existing code ...
+    ```
 
-Keystone doesn’t provide high-performance hardware-based memory encryption, as it requires a proprietary memory controller. Instead, it provides an example software-based encryption, which uses scratchpad SRAM (if any) to encrypt physical pages.
+16. Rebuild the runtime component:
+    ```
+    BUILDROOT_TARGET=keystone-runtime-dirclean make -j$(nproc)
+    ```
 
-## Team
+17. Rebuild all components:
+    ```
+    make -j$(nproc)
+    ```
 
-Contributors
+## Running the Environment
 
-- Gregor Haas
-- Evgeny Pobachienko
-- Jakob Sorensen
-- David Kholbrenner
-- Alex Thomas
-- Cathy Lu
-- Gui Andrade
-- Kevin Chen
-- Stephan Kaminsky
-- Dayeol Lee (Maintainer)
+18. Start QEMU:
+    ```
+    make run
+    ```
 
-Advisors
+19. Login as `root` with the password `sifive`
+    ```
+    buildroot login: root
+    Password: sifive
+    ```
+      
+21. In QEMU, start the Keystone driver:
+    ```
+    modprobe keystone-driver
+    ```
 
-- David Kohlbrenner @ UW
-- Shweta Shinde @ ETH Zurich
-- Krste Asanovic @ UCB
-- Dawn Song @ UCB
+22. Navigate to the examples directory:
+    ```
+    cd /usr/share/keystone/examples/
+    ```
 
-## License
+21. Run your chosen program from the examples.
 
-Keystone is under BSD-3.
-
-## Contributing
-
-See CONTRIBUTING.md
-
-## Citation
-
-If you want to cite the project, please use the following bibtex:
-
-```
-@inproceedings{lee2019keystone,
-    title={Keystone: An Open Framework for Architecting Trusted Execution Environments},
-    author={Dayeol Lee and David Kohlbrenner and Shweta Shinde and Krste Asanovic and Dawn Song},
-    year={2020},
-    booktitle = {Proceedings of the Fifteenth European Conference on Computer Systems},
-    series = {EuroSys’20}
-}
-```
+## Notes
+- Ongoing research and efforts are being made to improve the FHE implementations.
+- Please refer to the individual example directories for specific details on each FHE operation demonstration.
