@@ -17,7 +17,7 @@ void print_matrix(const vector<vector<uint64_t>>& matrix, const string& label) {
     }
 }
 
-// Pad and encrypt a vector (now a row of the input matrix)
+// Pad and encrypt a vector row-wise
 Ciphertext prepare_vector(const vector<uint64_t>& v, const BatchEncoder& batch_encoder, const Encryptor& encryptor) {
     size_t slot_count = batch_encoder.slot_count();
     vector<uint64_t> padded_v(slot_count, 0ULL);
@@ -92,7 +92,6 @@ int main() {
     cout << "Input matrix B:" << endl;
     print_matrix(B, "B");
 
-    // In the main function, replace the multiplication part with:
     cout << "\nPerforming encrypted matrix-matrix addition..." << endl;
 
     vector<Ciphertext> encrypted_result = fhe_matrix_addition(A, B, batch_encoder, encryptor, evaluator);

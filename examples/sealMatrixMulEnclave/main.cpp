@@ -17,7 +17,20 @@ void print_matrix(const vector<vector<uint64_t>>& matrix, const string& label) {
     }
 }
 
-// Pad and encrypt a vector (now a row of the input matrix)
+// Set the diagonals of the matrix 
+vector<vector<uint64_t>> prepare_matrix_diagonals(const vector<vector<uint64_t>>& M, size_t slot_count) {
+    size_t rows = M.size();
+    size_t cols = M[0].size();
+    vector<vector<uint64_t>> diagonals(rows, vector<uint64_t>(slot_count, 0ULL));
+    for (size_t i = 0; i < rows; ++i) {
+        for (size_t j = 0; j < slot_count; ++j) {
+            diagonals[i][j] = M[(j + i) % rows][j % cols];
+        }
+    }
+    return diagonals;
+}
+
+// Pad and encrypt a vector row-wise
 Ciphertext prepare_vector(const vector<uint64_t>& v, const BatchEncoder& batch_encoder, const Encryptor& encryptor) {
     size_t slot_count = batch_encoder.slot_count();
     vector<uint64_t> padded_v(slot_count, 0ULL);
@@ -31,98 +44,50 @@ Ciphertext prepare_vector(const vector<uint64_t>& v, const BatchEncoder& batch_e
     return encrypted_v;
 }
 
-// Set the diagonals of the matrix (generalized for any matrix size)
-vector<vector<uint64_t>> prepare_matrix_diagonals(const vector<vector<uint64_t>>& M, size_t slot_count) {
-    size_t rows = M.size();
-    size_t cols = M[0].size();
-    vector<vector<uint64_t>> diagonals(rows, vector<uint64_t>(slot_count, 0ULL));
-    for (size_t i = 0; i < rows; ++i) {
-        for (size_t j = 0; j < slot_count; ++j) {
-            diagonals[i][j] = M[(j + i) % rows][j % cols];
-        }
-    }
-    return diagonals;
-}
-
-
-Ciphertext fhe_vector_matrix_multiplication(const Ciphertext& encrypted_v, 
-                                            const vector<vector<uint64_t>>& diagonals,
-                                            size_t original_rows,
-                                            size_t original_cols,
-                                            const BatchEncoder& batch_encoder,
-                                            const Encryptor& encryptor,
-                                            const Evaluator& evaluator,
-                                            const GaloisKeys& galois_keys,
-                                            Decryptor& decryptor) {
-    Ciphertext result;
-    Plaintext temp_plain;
-    vector<uint64_t> temp_vec;
-
-    auto print_vector = [original_cols](const vector<uint64_t>& vec, const string& label) {
-        cout << label << ": [";
-        for (size_t i = 0; i < original_cols; i++) {
-            cout << vec[i];
-            if (i < original_cols - 1) cout << ", ";
-        }
-        cout << "]" << endl;
-    };
-
-    decryptor.decrypt(encrypted_v, temp_plain);
-    batch_encoder.decode(temp_plain, temp_vec);
-
-    for (size_t i = 0; i < original_rows; ++i) {
-        
-        Plaintext plain_diag;
-        batch_encoder.encode(diagonals[i], plain_diag);
-        Ciphertext encrypted_diag;
-        encryptor.encrypt(plain_diag, encrypted_diag);
-
-        Ciphertext temp;
-        evaluator.multiply(encrypted_v, encrypted_diag, temp);
-
-        if (i == 0) {
-            result = temp;
-        } else {
-            evaluator.add_inplace(result, temp);
-        }
-
-        decryptor.decrypt(result, temp_plain);
-        batch_encoder.decode(temp_plain, temp_vec);
-
-        if (i < original_rows - 1) {
-            evaluator.rotate_rows_inplace(const_cast<Ciphertext&>(encrypted_v), 1, galois_keys);
-            
-            decryptor.decrypt(encrypted_v, temp_plain);
-            batch_encoder.decode(temp_plain, temp_vec);
-        }
-    }
-    return result;
-}
-
-// New function for matrix-matrix multiplication
 vector<Ciphertext> fhe_matrix_matrix_multiplication(
     const vector<vector<uint64_t>>& A,
     const vector<vector<uint64_t>>& B,
     const BatchEncoder& batch_encoder,
     const Encryptor& encryptor,
     const Evaluator& evaluator,
-    const GaloisKeys& galois_keys,
-    Decryptor& decryptor) {
+    const GaloisKeys& galois_keys) {
     
     vector<Ciphertext> result;
     vector<vector<uint64_t>> B_diagonals = prepare_matrix_diagonals(B, batch_encoder.slot_count());
 
     size_t A_rows = A.size();
-    size_t A_cols = A[0].size();
     size_t B_rows = B.size();
     size_t B_cols = B[0].size();
 
     for (size_t row_index = 0; row_index < A_rows; row_index++) {
         Ciphertext encrypted_row = prepare_vector(A[row_index], batch_encoder, encryptor);
-        Ciphertext row_result = fhe_vector_matrix_multiplication(encrypted_row, B_diagonals, 
-                                                                 B_rows, B_cols, 
-                                                                 batch_encoder, encryptor, 
-                                                                 evaluator, galois_keys, decryptor);
+        Ciphertext row_result;
+
+        // Vector-matrix multiplication logic
+        for (size_t i = 0; i < B_rows; ++i) {
+            //encrypt the diagonal
+            Plaintext plain_diag;
+            batch_encoder.encode(B_diagonals[i], plain_diag);
+            Ciphertext encrypted_diag;
+            encryptor.encrypt(plain_diag, encrypted_diag);
+
+            // Multiply the encrypted vector with the encrypted diagonal
+            Ciphertext temp;
+            evaluator.multiply(encrypted_row, encrypted_diag, temp);
+
+            // Add the result of the multiplication to the accumulator
+            if (i == 0) {
+                row_result = temp;
+            } else {
+                evaluator.add_inplace(row_result, temp);
+            }
+
+            // Rotate the encrypted vector
+            if (i < B_rows - 1) {
+                evaluator.rotate_rows_inplace(encrypted_row, 1, galois_keys);
+            }
+        }
+
         result.push_back(row_result);
     }
 
@@ -173,11 +138,12 @@ int main() {
 
     cout << "\nPerforming encrypted matrix-matrix multiplication..." << endl;
 
-    vector<Ciphertext> encrypted_result = fhe_matrix_matrix_multiplication(A, B, batch_encoder, encryptor, evaluator, galois_keys, decryptor);
+    vector<Ciphertext> encrypted_result = fhe_matrix_matrix_multiplication(A, B, batch_encoder, encryptor, evaluator, galois_keys);
+    
     cout << "\nEncrypted computation complete." << endl;
 
     // Decrypt and print the result
-     vector<vector<uint64_t>> final_result;
+    vector<vector<uint64_t>> final_result;
     for (const auto& enc_row : encrypted_result) {
         Plaintext plain_row;
         decryptor.decrypt(enc_row, plain_row);
@@ -191,3 +157,6 @@ int main() {
 
     return 0;
 }
+
+
+
